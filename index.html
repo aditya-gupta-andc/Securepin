@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>EDD-3 Ghosi - Consumer Detail</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.5/xlsx.full.min.js"></script>
+    <style>
+        :root {
+            --primary-color: #2563eb;
+            --secondary-color: #1e40af;
+            --background: #f8fafc;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 15px;
+            background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+            min-height: 100vh;
+            -webkit-text-size-adjust: 100%;
+        }
+
+        .container {
+            background: white;
+            padding: 1rem;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+            margin: 0 auto;
+            max-width: 100%;
+        }
+
+        h1 {
+            color: var(--primary-color);
+            text-align: center;
+            margin: 1rem 0;
+            font-size: 1.8rem;
+            line-height: 1.3;
+        }
+
+        .data-controls {
+            margin: 0.8rem 0;
+            display: flex;
+            gap: 0.8rem;
+            align-items: center;
+        }
+
+        .data-status {
+            font-size: 0.9rem;
+            color: #64748b;
+            margin-left: auto;
+            max-width: 60%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .search-box {
+            position: relative;
+            margin-bottom: 1.5rem;
+        }
+
+        input {
+            width: 100%;
+            padding: 0.8rem;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 16px;
+            -webkit-appearance: none;
+        }
+
+        button {
+            padding: 0.5rem 1rem;
+            font-size: 0.9rem;
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            touch-action: manipulation;
+        }
+
+        .search-box button {
+            position: absolute;
+            right: 4px;
+            top: 4px;
+        }
+
+        .autocomplete-items {
+            position: absolute;
+            border: 1px solid #e2e8f0;
+            border-top: none;
+            z-index: 99;
+            top: 100%;
+            left: 0;
+            right: 0;
+            max-height: 50vh;
+            overflow-y: auto;
+            background: white;
+        }
+
+        .autocomplete-item {
+            padding: 12px;
+            font-size: 15px;
+            line-height: 1.4;
+        }
+
+        .result {
+            margin-top: 1.5rem;
+            padding: 1rem;
+            border-radius: 8px;
+            background: white;
+            border: 1px solid #e2e8f0;
+            font-size: 14px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        td {
+            padding: 10px;
+            border-bottom: 1px solid #e2e8f0;
+            word-break: break-word;
+        }
+
+        td:first-child {
+            font-weight: 500;
+            color: var(--primary-color);
+            width: 45%;
+            min-width: 100px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 1.5rem;
+            font-size: 1rem;
+            position: relative;
+        }
+
+        .loading::after {
+            content: "";
+            display: inline-block;
+            width: 1em;
+            height: 1em;
+            border: 2px solid #2563eb;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 0.8s linear infinite;
+            margin-left: 0.5rem;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .error {
+            font-size: 14px;
+            padding: 12px;
+            color: #dc2626;
+        }
+
+        #offline-status {
+            display: none;
+            margin-top: 0.5rem;
+        }
+
+        @media screen and (max-width: 480px) {
+            body {
+                padding: 10px;
+            }
+            
+            .container {
+                padding: 0.8rem;
+            }
+            
+            h1 {
+                font-size: 1.6rem;
+            }
+            
+            td {
+                padding: 8px;
+                font-size: 13px;
+            }
+            
+            button {
+                padding: 0.4rem 0.8rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Consumer Detail</h1>
+        <div class="data-controls">
+            <button onclick="refreshData()">⟳ Refresh Data</button>
+            <span id="data-status" class="data-status"></span>
+        </div>
+        <div id="offline-status" class="error">Offline - Using Offline data</div>
+        <div class="search-box">
+            <input type="text" id="consumerId" placeholder="Search Consumer ID or Name...">
+            <button onclick="searchConsumer()">Search</button>
+            <div id="autocomplete-list" class="autocomplete-items"></div>
+        </div>
+        <div id="loading" class="loading">Loading consumer data</div>
+        <div id="result" class="result"></div>
+    </div>
+
+    <script>
+        let consumerData = [];
+        let allConsumers = [];
+        const excelUrl = "https://raw.githubusercontent.com/aditya-gupta-andc/webpage/55759f90d38bd10804e22e5603dbd38131f767fb/master25.xlsx";
+        const DB_NAME = 'ConsumerDB';
+        const STORE_NAME = 'consumerCache';
+        const CACHE_KEY = 'cachedData';
+
+        // IndexedDB Management
+        async function initDB() {
+            return new Promise((resolve, reject) => {
+                if (!window.indexedDB) {
+                    reject(new Error("Browser doesn't support IndexedDB"));
+                    return;
+                }
+
+                const request = indexedDB.open(DB_NAME, 3);
+
+                request.onerror = (event) => {
+                    reject(`Database error: ${event.target.error}`);
+                };
+
+                request.onsuccess = () => resolve(request.result);
+
+                request.onupgradeneeded = (event) => {
+                    const db = event.target.result;
+                    if (!db.objectStoreNames.contains(STORE_NAME)) {
+                        const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+                        store.createIndex('timestamp', 'timestamp', { unique: false });
+                    }
+                };
+            });
+        }
+
+        async function getCachedData() {
+            try {
+                const db = await initDB();
+                return new Promise((resolve, reject) => {
+                    const transaction = db.transaction(STORE_NAME, 'readonly');
+                    const store = transaction.objectStore(STORE_NAME);
+                    const request = store.get(CACHE_KEY);
+
+                    request.onsuccess = () => resolve(request.result?.data || null);
+                    request.onerror = () => reject(request.error);
+                });
+            } catch (error) {
+                console.error('Cache retrieval error:', error);
+                return null;
+            }
+        }
+
+        async function storeCachedData(data) {
+            try {
+                const db = await initDB();
+                return new Promise((resolve, reject) => {
+                    const transaction = db.transaction(STORE_NAME, 'readwrite');
+                    const store = transaction.objectStore(STORE_NAME);
+                    const entry = {
+                        id: CACHE_KEY,
+                        data: data,
+                        timestamp: Date.now()
+                    };
+                    
+                    const request = store.put(entry);
+                    request.onsuccess = () => resolve();
+                    request.onerror = () => reject(request.error);
+                });
+            } catch (error) {
+                console.error('Cache storage error:', error);
+            }
+        }
+
+        // Data Loading
+        async function loadData() {
+            try {
+                const cached = await getCachedData();
+                
+                if (cached) {
+                    consumerData = cached.consumerData;
+                    allConsumers = cached.allConsumers;
+                    hideLoading();
+                    updateDataStatus(cached.timestamp);
+                    return;
+                }
+
+                if (!navigator.onLine) {
+                    showError('No internet connection and no cached data available');
+                    return;
+                }
+
+                await fetchData();
+            } catch (error) {
+                showError(`Initialization error: ${error.message}`);
+            }
+        }
+
+        async function fetchData() {
+            try {
+                showLoading('Fetching latest data...');
+                
+                const response = await fetch(excelUrl);
+                if (!response.ok) throw new Error(`HTTP error ${response.status}`);
+                
+                const arrayBuffer = await response.arrayBuffer();
+                const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+                const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+                const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                const headers = jsonData.shift();
+
+                consumerData = jsonData.map(row => 
+                    headers.reduce((obj, key, index) => {
+                        obj[key] = row[index] ?? '';
+                        return obj;
+                    }, {}));
+
+                allConsumers = consumerData.map(consumer => ({
+                    id: consumer.ACCT_ID?.toString() || '',
+                    name: consumer.NAME || 'N/A',
+                    data: consumer
+                }));
+
+                await storeCachedData({
+                    consumerData,
+                    allConsumers,
+                    timestamp: Date.now()
+                });
+
+                hideLoading();
+                updateDataStatus(Date.now());
+            } catch (error) {
+                const cached = await getCachedData();
+                if (cached) {
+                    consumerData = cached.consumerData;
+                    allConsumers = cached.allConsumers;
+                    hideLoading();
+                    updateDataStatus(cached.timestamp);
+                    showError('Using cached data - ' + error.message);
+                } else {
+                    showError(error.message);
+                }
+            }
+        }
+
+        // UI Functions
+        function updateDataStatus(timestamp) {
+            const date = new Date(timestamp);
+            document.getElementById('data-status').textContent = 
+                `Data updated: ${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
+        }
+
+        function showLoading(message = 'Loading...') {
+            const loading = document.getElementById('loading');
+            loading.textContent = message;
+            loading.style.display = 'block';
+        }
+
+        function hideLoading() {
+            document.getElementById('loading').style.display = 'none';
+        }
+
+        function showError(message) {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = `<div class="error">${message}</div>`;
+        }
+
+        // Search Functions
+        function debounce(func, timeout = 300) {
+            let timer;
+            return (...args) => {
+                clearTimeout(timer);
+                timer = setTimeout(() => func.apply(this, args), timeout);
+            };
+        }
+
+        function showAutocomplete() {
+            const input = document.getElementById('consumerId').value.toLowerCase();
+            const autocompleteList = document.getElementById('autocomplete-list');
+            autocompleteList.innerHTML = '';
+
+            if (!input) return;
+
+            const matches = allConsumers.filter(consumer =>
+                (consumer.id && consumer.id.includes(input)) || 
+                (consumer.name && consumer.name.toLowerCase().includes(input))
+            ).slice(0, 5);
+
+            matches.forEach(consumer => {
+                const div = document.createElement('div');
+                div.className = 'autocomplete-item';
+                div.innerHTML = `
+                    <div><strong>${consumer.id}</strong></div>
+                    <div style="color: #64748b; font-size: 0.9rem">${consumer.name}</div>
+                `;
+                div.onclick = () => {
+                    document.getElementById('consumerId').value = consumer.id;
+                    autocompleteList.innerHTML = '';
+                    searchConsumer();
+                };
+                autocompleteList.appendChild(div);
+            });
+        }
+
+        function searchConsumer() {
+            const consumerId = document.getElementById('consumerId').value.trim();
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = '';
+
+            if (!consumerId) {
+                resultDiv.innerHTML = '<div class="error">Please enter a Consumer ID</div>';
+                return;
+            }
+
+            const consumer = allConsumers.find(c => c.id === consumerId);
+
+            if (consumer) {
+                let html = '<h3 style="margin-bottom: 1rem; color: var(--primary-color)">Consumer Details</h3>';
+                html += '<table>';
+                Object.entries(consumer.data).forEach(([key, value]) => {
+                    if (value) html += `
+                        <tr>
+                            <td>${key}</td>
+                            <td>${value.toString()}</td>
+                        </tr>
+                    `;
+                });
+                html += '</table>';
+                resultDiv.innerHTML = html;
+            } else {
+                resultDiv.innerHTML = `<div class="error">Consumer ID "${consumerId}" not found</div>`;
+            }
+        }
+
+        // Event Handlers
+        async function refreshData() {
+            if (!navigator.onLine) {
+                alert('Cannot refresh while offline');
+                return;
+            }
+            
+            try {
+                document.getElementById('data-status').textContent = 'Updating data...';
+                await fetchData();
+            } catch (error) {
+                showError(`Refresh failed: ${error.message}`);
+            }
+        }
+
+        function updateOnlineStatus() {
+            document.getElementById('offline-status').style.display = 
+                navigator.onLine ? 'none' : 'block';
+        }
+
+        // Initialization
+        document.addEventListener('DOMContentLoaded', async () => {
+            window.addEventListener('online', updateOnlineStatus);
+            window.addEventListener('offline', updateOnlineStatus);
+            updateOnlineStatus();
+
+            try {
+                await initDB();
+                await loadData();
+                document.getElementById('consumerId').addEventListener('input', 
+                    debounce(showAutocomplete));
+                document.addEventListener('click', (e) => {
+                    if (!e.target.closest('.search-box')) {
+                        document.getElementById('autocomplete-list').innerHTML = '';
+                    }
+                });
+            } catch (error) {
+                showError(`Initialization failed: ${error.message}`);
+            }
+        });
+    </script>
+</body>
+</html>
